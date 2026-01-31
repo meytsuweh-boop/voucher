@@ -12,6 +12,10 @@ $result = $stmt->get_result();
 if (!$row = $result->fetch_assoc()) {
     die('Voucher not found.');
 }
+$scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+$host = $_SERVER['HTTP_HOST'] ?? '';
+$baseUrl = $host !== '' ? ($scheme . '://' . $host) : '';
+$qrUrl = $baseUrl !== '' ? ($baseUrl . '/qrcodes/' . rawurlencode($row['qr_image'])) : ('../qrcodes/' . rawurlencode($row['qr_image']));
 ?><!DOCTYPE html>
 <html>
 <head>
@@ -179,7 +183,7 @@ if (!$row = $result->fetch_assoc()) {
             <div><span class="voucher-label">Expiry:</span> <span class="voucher-value"><?= $row['expiry_date'] ?></span></div>
         </div>
         <div class="voucher-qr">
-            <img src="../qrcodes/<?= $row['qr_image'] ?>" alt="QR Code">
+            <img src="<?= htmlspecialchars($qrUrl) ?>" alt="QR Code">
         </div>
         <div class="voucher-note">Scan the QR or enter the code on the portal.</div>
         <button class="print-btn" onclick="window.print()">Print</button>

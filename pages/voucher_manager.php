@@ -470,7 +470,7 @@ $logs = $conn->query("SELECT * FROM redemption_log ORDER BY date_time DESC LIMIT
           <td data-label="Date Created" style="text-align:center;vertical-align:middle;"><?= $row['date_created'] ?></td>
           <td data-label="Date Used" style="text-align:center;vertical-align:middle;"><?= $row['date_used'] ?></td>
           <td data-label="Expiry" style="text-align:center;vertical-align:middle;"><?= $row['expiry_date'] ?></td>
-          <td data-label="QR" style="text-align:center;vertical-align:middle;"><a href="../qrcodes/<?= $row['qr_image'] ?>" download style="color:#1de9b6;font-weight:600;">QR</a></td>
+          <td data-label="QR" style="text-align:center;vertical-align:middle;"><a href="/qrcodes/<?= urlencode($row['qr_image']) ?>" download style="color:#1de9b6;font-weight:600;">QR</a></td>
           <td data-label="Actions" style="text-align:center;vertical-align:middle;">
             <div class="actions-icons">
               <a class="icon-btn pdf" href="download_pdf.php?code=<?= urlencode($row['code']) ?>" title="Download PDF" aria-label="Download PDF">
@@ -600,12 +600,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['minutes'])) {
     $qr_image = $code . '.png';
     $stmt = $conn->prepare("INSERT INTO vouchers (code, minutes, expiry_date, qr_image) VALUES (?, ?, ?, ?)");
     $stmt->bind_param('siss', $code, $minutes, $expiry, $qr_image);
-    if ($stmt->execute()) {
-        require_once '../vendor/phpqrcode/qrlib.php';
-        QRcode::png($code, '../qrcodes/' . $qr_image, QR_ECLEVEL_L, 6);
-        echo "<script>Swal.fire({icon: 'success',title: 'Voucher created!',showConfirmButton: false,timer: 1200}).then(()=>{window.location='voucher_manager.php';});</script>";
-        exit;
-    } else {
+      if ($stmt->execute()) {
+          require_once '../vendor/phpqrcode/qrlib.php';
+          $qrDir = __DIR__ . '/../qrcodes';
+          if (!is_dir($qrDir)) {
+              mkdir($qrDir, 0775, true);
+          }
+          QRcode::png($code, $qrDir . '/' . $qr_image, QR_ECLEVEL_L, 6);
+          echo "<script>Swal.fire({icon: 'success',title: 'Voucher created!',showConfirmButton: false,timer: 1200}).then(()=>{window.location='voucher_manager.php';});</script>";
+          exit;
+      } else {
         echo "<script>Swal.fire({icon: 'error',title: 'Error creating voucher.'});</script>";
     }
 }

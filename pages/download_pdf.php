@@ -22,10 +22,21 @@ $voucherHtml .= '<div style="margin-bottom:6px;"><b style="color:#3a7afe;">Minut
 $voucherHtml .= '<div style="margin-bottom:6px;"><b style="color:#3a7afe;">Status:</b> ' . $row['status'] . '</div>';
 $voucherHtml .= '<div style="margin-bottom:6px;"><b style="color:#3a7afe;">Date Created:</b> ' . $row['date_created'] . '</div>';
 $voucherHtml .= '<div style="margin-bottom:16px;"><b style="color:#3a7afe;">Expiry:</b> ' . $row['expiry_date'] . '</div>';
-$voucherHtml .= '<img src="../qrcodes/' . $row['qr_image'] . '" width="120" style="margin:18px 0;">';
+$qrPath = realpath(__DIR__ . '/../qrcodes/' . $row['qr_image']);
+if ($qrPath !== false) {
+    $voucherHtml .= '<img src="' . $qrPath . '" width="120" style="margin:18px 0;">';
+}
 $voucherHtml .= '</div>';
 
-$mpdf = new \Mpdf\Mpdf(['mode' => 'utf-8', 'format' => [80,120]]); // Small voucher size
+$tmpDir = rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'mpdf';
+if (!is_dir($tmpDir)) {
+    mkdir($tmpDir, 0775, true);
+}
+$mpdf = new \Mpdf\Mpdf([
+    'mode' => 'utf-8',
+    'format' => [80,120],
+    'tempDir' => $tmpDir,
+]); // Small voucher size
 $mpdf->WriteHTML($voucherHtml);
 $mpdf->Output('voucher_' . $row['code'] . '.pdf', 'D');
 exit;

@@ -13,7 +13,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 
 $code = $_POST['code'] ?? $_GET['code'] ?? '';
 if ($code) {
-    $stmt = $conn->prepare("UPDATE vouchers SET status='USED' WHERE code=? AND status='UNUSED'");
+    $stmt = $conn->prepare("UPDATE vouchers SET status='USED', date_used=NOW() WHERE code=? AND status='UNUSED'");
     $stmt->bind_param('s', $code);
     $stmt->execute();
     if ($stmt->affected_rows > 0) {

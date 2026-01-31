@@ -1,7 +1,9 @@
 FROM php:8.2-fpm-alpine
 
 RUN apk add --no-cache nginx supervisor \
-  && docker-php-ext-install mysqli pdo pdo_mysql
+    freetype-dev libjpeg-turbo-dev libpng-dev \
+  && docker-php-ext-configure gd --with-freetype --with-jpeg \
+  && docker-php-ext-install mysqli pdo pdo_mysql gd
 
 WORKDIR /var/www/html
 COPY . /var/www/html

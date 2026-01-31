@@ -25,9 +25,8 @@ extern "C"
 extern const char INDEX_HTML[] PROGMEM;
 
 // ================= VOUCHER CONFIG =================
-// ✅ CHANGE THIS TO YOUR PUBLIC VOUCHER SERVER (InfinityFree domain)
-// Example: "https://yourdomain.infinityfreeapp.com" or "https://yourdomain.infinityfreeapp.com/subfolder"
-const char *VOUCHER_SERVER = "https://wifipoint.infinityfreeapp.com";
+const char *VOUCHER_SERVER = "https://voucher-siys.onrender.com";
+
 const int VOUCHER_PORT = 80;
 
 // ================= SERVO LITE =================
@@ -113,7 +112,8 @@ unsigned long detectWindowStartMs = 0;
 const unsigned long DETECT_WINDOW_MS = 1800;
 bool detectWindowActive = false;
 int stableHits = 0;
-const int REQUIRED_HITS = 2;
+// Faster re-accept: fewer stable hits (tune up if you get false accepts)
+const int REQUIRED_HITS = 1;
 unsigned long emptyStableStart = 0;
 const unsigned long AUTO_TARE_MS = 1200;
 bool justTared = false;
@@ -136,7 +136,8 @@ const float OVERWEIGHT_G = 90.0;
 
 const int SERVO_CLOSED = 42;
 const int SERVO_OPEN = 134;
-const unsigned long SERVO_OPEN_MS = 1200;
+// Faster cycle time (tune up if bottles jam)
+const unsigned long SERVO_OPEN_MS = 800;
 const unsigned long BUZZ_MS = 200;
 const unsigned long SERVO_RETRY_GAP_MS = 80;
 
@@ -538,10 +539,17 @@ void servoPulseMove(int openAngle, int closeAngle, unsigned long openMs)
 
 void servoOpenCloseWithRetry()
 {
+  // Single cycle by default (faster). Retry only if still blocked / not cleared.
   servoPulseMove(SERVO_OPEN, SERVO_CLOSED, SERVO_OPEN_MS);
-  // Retry once to improve reliability
-  smartDelay(SERVO_RETRY_GAP_MS);
-  servoPulseMove(SERVO_OPEN, SERVO_CLOSED, SERVO_OPEN_MS);
+
+  smartDelay(120);
+  const bool irStillBlocked = (digitalRead(IR1_PIN) == LOW) || (digitalRead(IR2_PIN) == LOW);
+  const float gramsNow = scale.get_units(1);
+  if (irStillBlocked || gramsNow > ZERO_CLAMP_G)
+  {
+    smartDelay(SERVO_RETRY_GAP_MS);
+    servoPulseMove(SERVO_OPEN, SERVO_CLOSED, SERVO_OPEN_MS);
+  }
 }
 
 // ================= WEB UI (UPDATED WITH EXPIRY CHECK) =================
@@ -695,7 +703,7 @@ const char INDEX_HTML[] PROGMEM = R"HTML(
                   align-items:center;
                   justify-content:center;
                   padding:18px;
-                  z-index:9999;
+                  z-index:10002;
                 }
                 .swal{
                   width:min(420px, 100%);
@@ -927,6 +935,18 @@ const char INDEX_HTML[] PROGMEM = R"HTML(
               function scanQR(){
                 document.getElementById('qrModal').style.display = "block";
                 scannedValue = "";
+                if (typeof Html5Qrcode === "undefined") {
+                  swalAlert({
+                    icon: "question",
+                    title: "Scanner unavailable",
+                    text: "Offline mode can't load the QR scanner. Please type the code manually.",
+                    okText: "OK",
+                    okClass: "swal-btn-blue"
+                  });
+                  const input = document.getElementById("qrText");
+                  if (input) { input.focus(); }
+                  return;
+                }
                 qrScanner = new Html5Qrcode("qr-reader");
                 qrScanner.start(
                   { facingMode: "environment" },
@@ -942,10 +962,22 @@ const char INDEX_HTML[] PROGMEM = R"HTML(
               document.getElementById("qrFile").addEventListener("change", async (e)=>{
                 const file = e.target.files[0];
                 if(!file) return;
+                if (typeof Html5Qrcode === "undefined") {
+                  swalAlert({
+                    icon: "question",
+                    title: "Upload not available",
+                    text: "Offline mode can't decode images. Please type the code manually.",
+                    okText: "OK",
+                    okClass: "swal-btn-blue"
+                  });
+                  e.target.value = "";
+                  return;
+                }
                 if(!qrScanner) qrScanner = new Html5Qrcode("qr-reader");
                 const text = await qrScanner.scanFile(file, true);
                 scannedValue = text;
                 submitQR();
+                e.target.value = "";
               });
 
               async function submitQR(){
@@ -953,12 +985,36 @@ const char INDEX_HTML[] PROGMEM = R"HTML(
                 const code = scannedValue || manual;
                 if(!code){ toast("No voucher code detected"); return; }
                 try{
-                  const r = await api('/verifyQR?code=' + encodeURIComponent(code), 'POST');
-                  toast(r.msg || "Voucher accepted");
+                  const r = await api('/verifyQR?code=' + encodeURIComponent(code), 'POST', 12000);
+                  if (r && r.ok) {
+                    await swalAlert({
+                      icon: "gift",
+                      title: "Voucher accepted",
+                      text: r.msg || "Credit added to My Credit.",
+                      okText: "OK",
+                      okClass: "swal-btn-ok"
+                    });
+                  } else {
+                    await swalAlert({
+                      icon: "question",
+                      title: "Voucher not accepted",
+                      text: (r && r.msg) ? r.msg : "Please try again.",
+                      okText: "OK",
+                      okClass: "swal-btn-red"
+                    });
+                  }
                   closeQR();
                   refresh();
                 }catch(e){
-                  toast("Invalid voucher");
+                  await swalAlert({
+                    icon: "question",
+                    title: "Syncing...",
+                    text: "If the voucher was valid, credit will appear shortly. Please refresh.",
+                    okText: "OK",
+                    okClass: "swal-btn-blue"
+                  });
+                  closeQR();
+                  refresh();
                 }
               }
 
@@ -1066,6 +1122,7 @@ const char INDEX_HTML[] PROGMEM = R"HTML(
                   ca.textContent = cancelText;
                   ok.className = okClass;
                   ca.className = "swal-btn-cancel";
+                  ca.style.display = "";
 
                   function close(val){
                     bd.style.display="none";
@@ -1084,14 +1141,49 @@ const char INDEX_HTML[] PROGMEM = R"HTML(
                 });
               }
 
+              function swalAlert({icon="question", title="Notice", text="", okText="OK", okClass="swal-btn-ok"}){
+                return new Promise((resolve)=>{
+                  const bd = document.getElementById('swalBackdrop');
+                  const box= document.getElementById('swalBox');
+                  const ico= document.getElementById('swalIco');
+                  const ttl= document.getElementById('swalTitle');
+                  const txt= document.getElementById('swalText');
+                  const ok = document.getElementById('swalOk');
+                  const ca = document.getElementById('swalCancel');
+
+                  ico.innerHTML = ICONS[icon] || ICONS.question;
+                  ttl.textContent = title;
+                  txt.textContent = text;
+                  ok.textContent = okText;
+                  ok.className = okClass;
+                  ca.style.display = "none";
+
+                  function close(){
+                    bd.style.display="none";
+                    box.classList.remove('show');
+                    ok.onclick = null;
+                    ca.onclick = null;
+                    bd.onclick = null;
+                    resolve(true);
+                  }
+
+                  bd.style.display="flex";
+                  requestAnimationFrame(()=> box.classList.add('show'));
+                  ok.onclick = ()=> close();
+                  bd.onclick = (e)=>{ if(e.target===bd) close(); };
+                });
+              }
+
               // ✅ CHECK FOR SESSION EXPIRY
+              let expiredShown = false;
               async function checkExpiry() {
                 try {
                   const j = await api('/checkExpired', 'GET', 3000);
-                  if (j.expired) {
+                  if (j.expired && !expiredShown) {
                     document.getElementById('expiredOverlay').style.display = 'flex';
                     clearInterval(cdTimer);
                     cdTimer = null;
+                    expiredShown = true;
                   }
                 } catch(e) {}
               }
@@ -1333,6 +1425,8 @@ const char INDEX_HTML[] PROGMEM = R"HTML(
               }, 2000);
 
               refresh();
+              // Reset expiredShown on reload
+              window.addEventListener('beforeunload', () => { expiredShown = false; });
                 </script>
               </body>
               </html>
@@ -1410,7 +1504,11 @@ void setupWeb()
   server.on("/connect", HTTP_POST, []()
             {
                   String me = requesterId();
-                  ensureUser(me);
+                  int idx = ensureUser(me);
+                  // Always clear expired flag on connect attempt
+                  if (idx >= 0) {
+                    users[idx].expired = false;
+                  }
 
                   if (!powerOn) {
                     server.send(200, "application/json", "{\"ok\":false,\"msg\":\"Power OFF\"}");
@@ -1534,6 +1632,7 @@ void setupWeb()
                     server.send(200, "application/json", "{\"ok\":false,\"msg\":\"STA not connected\"}");
                     return;
                   }
+
 
                   users[idx].sessionStartMs = millis();
                   users[idx].sessionEndMs = users[idx].sessionStartMs + (unsigned long)users[idx].creditSec * 1000UL;
@@ -1772,7 +1871,8 @@ void loop()
   bool ir1 = (digitalRead(IR1_PIN) == LOW);
   bool ir2 = (digitalRead(IR2_PIN) == LOW);
 
-  float grams = scale.get_units(3);
+  // Faster response: fewer averaged reads (tune to 2 if noisy)
+  float grams = scale.get_units(1);
   if (grams < ZERO_CLAMP_G)
     grams = 0;
 

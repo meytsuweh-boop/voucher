@@ -8,6 +8,10 @@ RUN apk add --no-cache nginx supervisor \
 WORKDIR /var/www/html
 COPY . /var/www/html
 
+RUN mkdir -p /var/www/html/qrcodes \
+  && chown -R www-data:www-data /var/www/html/qrcodes \
+  && chmod 775 /var/www/html/qrcodes
+
 RUN rm /etc/nginx/http.d/default.conf
 COPY render/nginx.conf /etc/nginx/http.d/default.conf
 COPY render/supervisord.conf /etc/supervisord.conf

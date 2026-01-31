@@ -114,6 +114,9 @@ bool detectWindowActive = false;
 int stableHits = 0;
 // Faster re-accept: fewer stable hits (tune up if you get false accepts)
 const int REQUIRED_HITS = 1;
+// Require weight to be stable for a short period before counting as a hit.
+unsigned long stableStartMs = 0;
+float stableRefGrams = 0;
 unsigned long emptyStableStart = 0;
 const unsigned long AUTO_TARE_MS = 1200;
 bool justTared = false;
@@ -1884,6 +1887,8 @@ void loop()
     servo.write(SERVO_CLOSED);
     detectWindowActive = false;
     stableHits = 0;
+    stableStartMs = 0;
+    stableRefGrams = 0;
     bottleAccepted = false;
     irTriggered = false; // ✅ RESET IR trigger
   }
@@ -1909,6 +1914,8 @@ void loop()
       detectWindowActive = true;
       detectWindowStartMs = millis();
       stableHits = 0;
+      stableStartMs = 0;
+      stableRefGrams = 0;
       Serial.println("👀 IR CONFIRMED + WEIGHT RISE → START WINDOW");
     }
   }
@@ -1920,48 +1927,70 @@ void loop()
       Serial.println("⌛ WINDOW EXPIRED");
       detectWindowActive = false;
       stableHits = 0;
+      stableStartMs = 0;
+      stableRefGrams = 0;
       irTriggered = false; // ✅ RESET IR trigger - ready for next attempt
     }
     else
     {
       if (grams >= MIN_G && grams <= MAX_G)
       {
-        stableHits++;
-        Serial.print("✔ WEIGHT HIT ");
-        Serial.println(stableHits);
-
-        if (stableHits >= REQUIRED_HITS &&
-            millis() - lastAcceptMs > MIN_GAP_MS)
+        // Require the weight to stay within +/- STABLE_DELTA_G for STABLE_TIME_MS before counting as a hit.
+        if (stableStartMs == 0)
         {
-          lastAcceptMs = millis();
-
-          Serial.println("✅ BOTTLE ACCEPTED");
-          creditBottleToActiveUser();
-
-          digitalWrite(BUZZER_PIN, HIGH);
-          smartDelay(120);
-          digitalWrite(BUZZER_PIN, LOW);
-
-          servoOpenCloseWithRetry();
-
-          // ✅ Immediately tare after close so next bottle can be dropped right away
-          scale.tare();
-          lastGrams = 0;
-          emptyStableStart = 0;
-          justTared = true;
-          needRetare = false;
-
-          bottleAccepted = false;
-          irTriggered = false;
-          acceptClearStartMs = 0;
-          detectWindowActive = false;
+          stableStartMs = millis();
+          stableRefGrams = grams;
+        }
+        else if (fabs(grams - stableRefGrams) > STABLE_DELTA_G)
+        {
+          // Weight moved too much: restart stability window and discard partial hits.
+          stableStartMs = millis();
+          stableRefGrams = grams;
           stableHits = 0;
-          Serial.println("⚖️ TARE DONE (POST-CLOSE)");
+        }
+        else if (millis() - stableStartMs >= STABLE_TIME_MS)
+        {
+          stableHits++;
+          stableStartMs = 0;
+          Serial.print("✔ WEIGHT STABLE ");
+          Serial.println(stableHits);
+
+          if (stableHits >= REQUIRED_HITS &&
+              millis() - lastAcceptMs > MIN_GAP_MS)
+          {
+            lastAcceptMs = millis();
+
+            Serial.println("✅ BOTTLE ACCEPTED");
+            creditBottleToActiveUser();
+
+            digitalWrite(BUZZER_PIN, HIGH);
+            smartDelay(120);
+            digitalWrite(BUZZER_PIN, LOW);
+
+            servoOpenCloseWithRetry();
+
+            // ✅ Immediately tare after close so next bottle can be dropped right away
+            scale.tare();
+            lastGrams = 0;
+            emptyStableStart = 0;
+            justTared = true;
+            needRetare = false;
+
+            bottleAccepted = false;
+            irTriggered = false;
+            acceptClearStartMs = 0;
+            detectWindowActive = false;
+            stableHits = 0;
+            stableStartMs = 0;
+            stableRefGrams = 0;
+            Serial.println("⚖️ TARE DONE (POST-CLOSE)");
+          }
         }
       }
       else
       {
         stableHits = 0;
+        stableStartMs = 0;
       }
     }
   }
